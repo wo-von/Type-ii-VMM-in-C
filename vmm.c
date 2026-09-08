@@ -34,15 +34,15 @@ static void dump_state(int vcpufd) {
     struct kvm_sregs sreg;
     ioctl(vcpufd, KVM_GET_REGS, &reg);
     ioctl(vcpufd, KVM_GET_SREGS, &sreg);
-    printf("rip = %llx\n", reg.rip);
-    printf("rsp = %llx\n", reg.rsp);
-    printf("rflags = %llx\n", reg.rflags);
-    printf("rax = %llx\n", reg.rax);
-    printf("cr0 = %llx, cr3 = %llx, cr4 = %llx\n", sreg.cr0, sreg.cr3, sreg.cr4);
-    printf("efer = %llx\n", sreg.efer);
-    printf("cs base=%llx limit=%X type=%X l=%X db=%X", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
+    printf("rip = %X\n", reg.rip);
+    printf("rsp = %X\n", reg.rsp);
+    printf("rflags = %X\n", reg.rflags);
+    printf("rax = %X\n", reg.rax);
+    printf("cr0 = %X, cr3 = %X, cr4 = %X\n", sreg.cr0, sreg.cr3, sreg.cr4);
+    printf("efer = %X\n", sreg.efer);
+    printf("cs base=%X limit=%X type=%X l=%X db=%X", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
            sreg.cs.l, sreg.cs.db);
-    printf("ss base=%llx limit=%X type=%X l=%X db=%X", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
+    printf("ss base=%X limit=%X type=%X l=%X db=%X", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
            sreg.ss.l, sreg.ss.db);
 }
 int main() {
