@@ -32,17 +32,23 @@ const uint8_t code[] = {
 static void dump_state(int vcpufd) {
     struct kvm_regs reg;
     struct kvm_sregs sreg;
-    ioctl(vcpufd, KVM_GET_REGS, &reg);
-    ioctl(vcpufd, KVM_GET_SREGS, &sreg);
+    int ret = ioctl(vcpufd, KVM_GET_REGS, &reg);
+    if (ret == -1) {
+        err(1, "KVM_GET_REGS failed");
+    }
+    ret = ioctl(vcpufd, KVM_GET_SREGS, &sreg);
+    if (ret == -1) {
+        err(1, "KVM_GET_SREGS failed");
+    }
     printf("rip = %llX\n", reg.rip);
     printf("rsp = %llX\n", reg.rsp);
     printf("rflags = %llX\n", reg.rflags);
     printf("rax = %llX\n", reg.rax);
     printf("cr0 = %llX, cr3 = %llX, cr4 = %llX\n", sreg.cr0, sreg.cr3, sreg.cr4);
     printf("efer = %llX\n", sreg.efer);
-    printf("cs base=%llX limit=%X type=%X l=%X db=%X", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
+    printf("cs base=%llX limit=%X type=%X l=%X db=%X\n", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
            sreg.cs.l, sreg.cs.db);
-    printf("ss base=%llX limit=%X type=%X l=%X db=%X", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
+    printf("ss base=%llX limit=%X type=%X l=%X db=%X\n", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
            sreg.ss.l, sreg.ss.db);
 }
 int main() {
@@ -68,17 +74,20 @@ int main() {
     }
 
     int vmfd = ioctl(kvm, KVM_CREATE_VM, (unsigned long) 0);
+    if (vmfd == -1) {
+        err(1, "KVM_CREATE_VM failed");
+    }
 
     void *mem = mmap(NULL, MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
     if (mem == MAP_FAILED) {
         err(1, "mmap failed");
     }
-    memcpy(mem, code, sizeof(code));
+    memcpy(mem + 0x3000, code, sizeof(code));
 
     struct kvm_userspace_memory_region region = {
         .slot = 0,
-        .guest_phys_addr = 0x1000,
+        .guest_phys_addr = 0x0000,
         .memory_size = MEM_SIZE,
         .userspace_addr = (uint64_t) mem,
     };
@@ -100,12 +109,15 @@ int main() {
     struct kvm_run *run =
         (struct kvm_run *) mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, vcpufd, 0);
 
-    if (run == NULL) {
+    if (run == MAP_FAILED) {
         err(1, "mmap for VCPU failed");
     }
     // read the sregs and set cs to 0
     struct kvm_sregs sregs;
-    ioctl(vcpufd, KVM_GET_SREGS, &sregs);
+    ret = ioctl(vcpufd, KVM_GET_SREGS, &sregs);
+    if (ret == -1) {
+        err(1, "KVM_GET_SREGS failed");
+    }
     sregs.cs.base = 0;
     sregs.cs.selector = 0;
     ret = ioctl(vcpufd, KVM_SET_SREGS, &sregs);
@@ -113,7 +125,7 @@ int main() {
         err(1, "KVM_SET_SREGS failed");
     }
     struct kvm_regs regs = {
-        .rip = 0x1000,
+        .rip = 0x3000,
         .rax = 2,
         .rbx = 2,
         .rflags = 0x2,
@@ -125,8 +137,8 @@ int main() {
     while (1) {
         ret = ioctl(vcpufd, KVM_RUN, NULL);
         if (ret == -1) {
-            err(1, "KVM_RUN_FAILED");
             dump_state(vcpufd);
+            err(1, "KVM_RUN_FAILED");
         }
         switch (run->exit_reason) {
         case KVM_EXIT_HLT:
@@ -142,11 +154,17 @@ int main() {
                 errx(1, "unhandled KVM_EXIT_IO");
             break;
         case KVM_EXIT_FAIL_ENTRY:
+            dump_state(vcpufd);
             errx(1, "KVM_EXIT_FAIL_ENTRY: hardware_entry_failure_reason = 0x%llx",
                  (unsigned long long) run->fail_entry.hardware_entry_failure_reason);
             break;
         case KVM_EXIT_INTERNAL_ERROR:
+            dump_state(vcpufd);
             errx(1, "KVM_EXIT_INTERNAL_ERROR: suberror = 0x%x", run->internal.suberror);
+            break;
+        default:
+            dump_state(vcpufd);
+            errx(1, "check KVM exit");
         }
     }
 }
