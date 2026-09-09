@@ -34,15 +34,15 @@ static void dump_state(int vcpufd) {
     struct kvm_sregs sreg;
     ioctl(vcpufd, KVM_GET_REGS, &reg);
     ioctl(vcpufd, KVM_GET_SREGS, &sreg);
-    printf("rip = %X\n", reg.rip);
-    printf("rsp = %X\n", reg.rsp);
-    printf("rflags = %X\n", reg.rflags);
-    printf("rax = %X\n", reg.rax);
-    printf("cr0 = %X, cr3 = %X, cr4 = %X\n", sreg.cr0, sreg.cr3, sreg.cr4);
-    printf("efer = %X\n", sreg.efer);
-    printf("cs base=%X limit=%X type=%X l=%X db=%X", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
+    printf("rip = %llX\n", reg.rip);
+    printf("rsp = %llX\n", reg.rsp);
+    printf("rflags = %llX\n", reg.rflags);
+    printf("rax = %llX\n", reg.rax);
+    printf("cr0 = %llX, cr3 = %llX, cr4 = %llX\n", sreg.cr0, sreg.cr3, sreg.cr4);
+    printf("efer = %llX\n", sreg.efer);
+    printf("cs base=%llX limit=%X type=%X l=%X db=%X", sreg.cs.base, sreg.cs.limit, sreg.cs.type,
            sreg.cs.l, sreg.cs.db);
-    printf("ss base=%X limit=%X type=%X l=%X db=%X", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
+    printf("ss base=%llX limit=%X type=%X l=%X db=%X", sreg.ss.base, sreg.ss.limit, sreg.ss.type,
            sreg.ss.l, sreg.ss.db);
 }
 int main() {
@@ -94,24 +94,40 @@ int main() {
     }
 
     int mmap_size = ioctl(kvm, KVM_GET_VCPU_MMAP_SIZE, NULL); // to communicate with the userspace
+    if (mmap_size <= 0) {
+        err(1, "KVM_GET_VCPU_MMAP_SIZE failed");
+    }
     struct kvm_run *run =
         (struct kvm_run *) mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, vcpufd, 0);
+
+    if (run == NULL) {
+        err(1, "mmap for VCPU failed");
+    }
     // read the sregs and set cs to 0
     struct kvm_sregs sregs;
     ioctl(vcpufd, KVM_GET_SREGS, &sregs);
     sregs.cs.base = 0;
     sregs.cs.selector = 0;
-    ioctl(vcpufd, KVM_SET_SREGS, &sregs);
+    ret = ioctl(vcpufd, KVM_SET_SREGS, &sregs);
+    if (ret == -1) {
+        err(1, "KVM_SET_SREGS failed");
+    }
     struct kvm_regs regs = {
         .rip = 0x1000,
         .rax = 2,
         .rbx = 2,
         .rflags = 0x2,
     };
-    ioctl(vcpufd, KVM_SET_REGS, &regs);
+    ret = ioctl(vcpufd, KVM_SET_REGS, &regs);
+    if (ret == -1) {
+        err(1, "KVM_SET_REGS failed");
+    }
     while (1) {
-        ioctl(vcpufd, KVM_RUN, NULL);
-        dump_state(vcpufd);
+        ret = ioctl(vcpufd, KVM_RUN, NULL);
+        if (ret == -1) {
+            err(1, "KVM_RUN_FAILED");
+            dump_state(vcpufd);
+        }
         switch (run->exit_reason) {
         case KVM_EXIT_HLT:
             puts("KVM_EXIT_HLT");
