@@ -18,6 +18,10 @@ guest physical
 0x400000   top of RAM             <- RSP (stack pointer) starts here, stack grows down
 */
 #define MEM_SIZE (1UL << 22) // 4MiB
+#define PML4_ADDR 0x0000
+#define PDPT_ADDR 0x1000
+#define PD_ADDR 0x2000
+#define CODE_ADDR 0x3000
 
 const uint8_t code[] = {
     0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
@@ -27,6 +31,12 @@ const uint8_t code[] = {
     0xb0, '\n',       /* mov $'\n', %al */
     0xee,             /* out %al, (%dx) */
     0xf4,             /* hlt */
+};
+
+struct PageTable {
+    uint64_t *pml4;
+    uint64_t *pdpt;
+    uint64_t *pd;
 };
 
 #define PDE64_PRESENT (1U << 0)
@@ -112,6 +122,16 @@ static void dump_state(int vcpufd, void *mem) {
            sreg.ss.l, sreg.ss.db);
     dump_page_tables(mem, sreg.cr3);
 }
+
+static void build_page_tables(struct PageTable *pt, void *mem) {
+    pt->pml4 = (uint64_t *) ((uint8_t *) mem + PML4_ADDR);
+    pt->pml4[0] = PDE64_PRESENT | PDE64_RW | PDPT_ADDR;
+    pt->pdpt = (uint64_t *) ((uint8_t *) mem + PDPT_ADDR);
+    pt->pdpt[0] = PDE64_PRESENT | PDE64_RW | PD_ADDR;
+    pt->pd = (uint64_t *) ((uint8_t *) mem + PD_ADDR);
+    pt->pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_PS | 0x000000; // 2MiB
+    pt->pd[1] = PDE64_PRESENT | PDE64_RW | PDE64_PS | 0x200000;
+}
 int main() {
     int kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (kvm == -1) {
@@ -144,11 +164,11 @@ int main() {
     if (mem == MAP_FAILED) {
         err(1, "mmap failed");
     }
-    memcpy(mem + 0x3000, code, sizeof(code));
+    memcpy(mem + CODE_ADDR, code, sizeof(code));
 
     struct kvm_userspace_memory_region region = {
         .slot = 0,
-        .guest_phys_addr = 0x0000,
+        .guest_phys_addr = PML4_ADDR,
         .memory_size = MEM_SIZE,
         .userspace_addr = (uint64_t) mem,
     };
@@ -186,7 +206,7 @@ int main() {
         err(1, "KVM_SET_SREGS failed");
     }
     struct kvm_regs regs = {
-        .rip = 0x3000,
+        .rip = CODE_ADDR,
         .rax = 2,
         .rbx = 2,
         .rflags = 0x2,
@@ -195,6 +215,11 @@ int main() {
     if (ret == -1) {
         err(1, "KVM_SET_REGS failed");
     }
+    // build page tables
+    struct PageTable pt;
+    build_page_tables(&pt, mem);
+    dump_state(vcpufd, mem);
+
     while (1) {
         ret = ioctl(vcpufd, KVM_RUN, NULL);
         if (ret == -1) {
