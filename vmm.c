@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <err.h>
 #include <fcntl.h>
 #include <linux/kvm.h>
@@ -190,6 +191,17 @@ static void set_regs(int vcpufd) {
     }
 }
 
+static void prove_longmode(int vcpufd) {
+    struct kvm_regs regs;
+    int ret = ioctl(vcpufd, KVM_GET_REGS, &regs);
+    if (ret == -1) {
+        err(1, "KVM_GET_REG failed");
+    }
+    uint64_t x = 0x1122334455667788ULL;
+    assert(regs.r15 == x);
+    fprintf(stdout, "r15 = %llu\nassertion passed\n", regs.r15);
+}
+
 int main() {
     int kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (kvm == -1) {
@@ -258,7 +270,6 @@ int main() {
     // read the sregs and set cs to 0
     set_regs(vcpufd);
     dump_state(vcpufd, mem);
-
     while (1) {
         ret = ioctl(vcpufd, KVM_RUN, NULL);
         if (ret == -1) {
@@ -267,6 +278,7 @@ int main() {
         }
         switch (run->exit_reason) {
         case KVM_EXIT_HLT:
+            prove_longmode(vcpufd);
             puts("KVM_EXIT_HLT");
             return 0;
 
