@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A minimal Type-II VMM (hypervisor) written directly against the Linux KVM API, built incrementally by following the LWN article ["Using the KVM API"](https://lwn.net/Articles/658511/). The active work lives in `vmm.c`. `vmm_hello_world.c` is a frozen checkpoint of the earlier 16-bit real-mode stage (the article's original example) kept for reference/comparison — it is not being extended further.
+A minimal Type-II VMM (hypervisor) written directly against the Linux KVM API, built incrementally by following the LWN article ["Using the KVM API"](https://lwn.net/Articles/658511/). The active work lives in `vmm.c`. `vmm_hello_world.c` is a frozen checkpoint of the earlier 16-bit real-mode stage (the article's original example) kept for reference/comparison — it is not being extended further. See `README.md` for the full picture (memory layout, build/run, what's proven, what's explicitly not implemented).
 
-`vmm.c` has moved past the article's 16-bit example and is now working through `long_mode_roadmap.md` to bring the guest up into 64-bit long mode. Guest memory setup + identity-mapped page tables, vcpu creation, sregs/regs configuration, a `dump_state`/`dump_page_tables` debugging pair, and the `KVM_RUN` exit-handling loop (`KVM_EXIT_HLT`, `KVM_EXIT_IO`, `KVM_EXIT_FAIL_ENTRY`, `KVM_EXIT_INTERNAL_ERROR`) already exist. `code[]` at the top of the file is still the original 16-bit real-mode blob (writes to I/O port `0x3f8`, COM1 serial) and is expected to be replaced with real 64-bit guest code as long-mode work proceeds — don't assume it's the final payload.
+**Stage 2 (bringing the guest up into 64-bit long mode, per `assets/long_mode_roadmap.md`) is complete.** `vmm.c` has: identity-mapped page table construction (`build_page_tables`), control-register/segment-descriptor setup for long mode (`set_regs`), a `dump_state`/`dump_page_tables` debugging pair, a runtime guest-image loader (`load_guest_image`, reads a compiled binary off disk into guest memory — there is no compiled-in guest array any more), and a `KVM_RUN` exit-handling loop covering `KVM_EXIT_HLT`, `KVM_EXIT_IO`, `KVM_EXIT_FAIL_ENTRY`, `KVM_EXIT_INTERNAL_ERROR`. On halt, `prove_longmode()` reads `%r15` back via `KVM_GET_REGS` and asserts it matches a 64-bit constant the guest (`guest64.c`) `movq`'d into it — the actual proof of genuine 64-bit execution, not just the printed string.
 
 ### Memory layout (`vmm.c`)
 
@@ -21,21 +21,28 @@ Guest-physical layout, identity-mapped 1:1 onto offsets into the host `mmap`'d r
 0x400000   top of RAM        <- RSP starts here, stack grows down
 ```
 
-Per `long_mode_roadmap.md`, most bugs at this stage are the address told to the CPU (in a page table entry, `sregs`, or `regs`) disagreeing with the address something was actually loaded/mapped at — check this layout against the code first when debugging a triple fault or `KVM_EXIT_FAIL_ENTRY`.
+Per `assets/long_mode_roadmap.md`, most bugs at this stage are the address told to the CPU (in a page table entry, `sregs`, or `regs`) disagreeing with the address something was actually loaded/mapped at — check this layout against the code first when debugging a triple fault or `KVM_EXIT_FAIL_ENTRY`.
 
-### `long_mode_roadmap.md`
+### `assets/long_mode_roadmap.md`
 
-A self-contained guide for the current stage, written to map x86 long-mode bring-up onto ARM/AArch64 MMU concepts the user already knows: paging (PML4/PDPT/PD/PT vs ARM translation tables), two-dimensional paging (EPT/NPT vs guest page tables), x86 segmentation and the GDT "hidden cache" trick, and the CR0/CR3/CR4/EFER control registers. It also has an ordered implementation checklist with success indicators, a table mapping KVM exit reasons to likely causes, and pointers into `Documentation/virt/kvm/api.rst` and the AMD64/Intel SDM manuals. Point the user at the relevant section here before re-deriving a long-mode concept from scratch.
+A self-contained guide for the long-mode stage (now complete, see above), written to map x86 long-mode bring-up onto ARM/AArch64 MMU concepts the user already knows: paging (PML4/PDPT/PD/PT vs ARM translation tables), two-dimensional paging (EPT/NPT vs guest page tables), x86 segmentation and the GDT "hidden cache" trick, and the CR0/CR3/CR4/EFER control registers. It also has an ordered implementation checklist with success indicators, a table mapping KVM exit reasons to likely causes, and pointers into `Documentation/virt/kvm/api.rst` and the AMD64/Intel SDM manuals — still worth pointing the user at the relevant section for any long-mode concept that needs re-deriving, and useful background for whatever stage comes next.
 
 ## Build
 
 ```sh
-gcc -g -O0 -Wall -Wextra -std=gnu17 -o vmm vmm.c
+make        # builds vmm, guest64.elf, guest64.bin (default goal: `all`)
+make vmm    # just the VMM
+make guest  # just the guest image (guest64.c -> guest64.elf -> guest64.bin)
+make clean
 ```
+
+Equivalent to `make vmm`: `gcc -g -O0 -Wall -Wextra -std=gnu17 -o vmm vmm.c`.
 
 - Always keep `-Wall -Wextra` on.
 - Use `-std=gnu17` (GNU dialect), not plain `c17`/`c99`. Strict ISO mode hides POSIX/GNU-only declarations behind glibc feature-test macros (e.g. `O_CLOEXEC` from `<fcntl.h>` disappears under `-std=c17`), even though it compiles fine under gcc's actual default dialect.
 - `compile_flags.txt` (for clangd) and `.vscode/c_cpp_properties.json` (for the Microsoft C/C++ extension) both pin `gnu17` so editor diagnostics match what `gcc` actually accepts — keep them in sync if the build flags change.
+- `guest64.c` is compiled freestanding for `-m64` with a very different flag set (`-ffreestanding -fno-pie -no-pie -nostdlib -mno-red-zone -fno-stack-protector -fno-asynchronous-unwind-tables`, linked with `-Wl,-Ttext=0x3000` to match `CODE_ADDR`/`rip` in `vmm.c`) — see `Makefile`'s `GUEST_CFLAGS`/`GUEST_LDFLAGS`. It's a hosted-vs-freestanding distinction, not a style choice; don't merge the two flag sets.
+- `vmm.c` loads the guest at runtime via `load_guest_image()` (`open`/`fstat`/`read` straight into guest memory) from `guest64.bin` in the current working directory — `make`/`./vmm` both assume you're running from the repo root.
 
 VS Code: press F5 (`.vscode/launch.json` + `.vscode/tasks.json` build with `-g -O0` and launch gdb automatically).
 

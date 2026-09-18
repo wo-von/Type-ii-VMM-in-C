@@ -382,9 +382,13 @@ exit counts by type, which is cruder but often enough.
 1. `Documentation/virt/kvm/api.rst` — sections on `KVM_SET_SREGS`,
    `KVM_SET_REGS`, `kvm_run`, and `KVM_SET_USER_MEMORY_REGION`. This is the
    contract; everything else is commentary.
-2. **AMD64 Architecture Programmer's Manual, Vol. 2**, ch. 5 (page translation)
-   and §14.6 (long mode initialisation). AMD's manual is consistently clearer
-   than Intel's on exactly this transition, and it is free.
+2. **[AMD64 Architecture Programmer's Manual, Vol. 2](https://docs.amd.com/v/u/en-US/24593_3.45_APM_Vol2_PUB)**
+   (doc #24593, AMD's official technical documentation portal), ch. 5 (page
+   translation) and §14.6 (long mode initialisation). AMD's manual is
+   consistently clearer than Intel's on exactly this transition, and it is
+   free. (A copy used to be committed at `assets/amd_2_24593.pdf` — removed to
+   keep a 5 MB copyrighted PDF out of the repo; fetch it from the link above
+   instead.)
 3. **Intel SDM Vol. 3A**, ch. 4 (paging) and §9.8.5 (initialising IA-32e mode).
    Use as cross-reference when AMD and reality disagree.
 4. OSDev wiki: *Setting Up Long Mode*, *Paging*, *Global Descriptor Table*.
