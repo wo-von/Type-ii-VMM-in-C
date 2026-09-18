@@ -167,7 +167,14 @@ static void set_regs(int vcpufd) {
     if (ret == -1) {
         err(1, "KVM_SET_SREGS failed");
     }
-    regs.rip = CODE_ADDR, regs.rax = 2, regs.rbx = 2, regs.rflags = 0x2,
+    // now regs
+    ret = ioctl(vcpufd, KVM_GET_REGS, &regs);
+    if (ret == -1) {
+        err(1, "KVM_GET_REGS failed");
+    }
+    regs.rip = CODE_ADDR;
+    regs.rsp = 0x400000;
+    regs.rflags = 0x2;
     ret = ioctl(vcpufd, KVM_SET_REGS, &regs);
     if (ret == -1) {
         err(1, "KVM_SET_REGS failed");
