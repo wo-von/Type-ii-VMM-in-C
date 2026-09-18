@@ -132,6 +132,48 @@ static void build_page_tables(struct PageTable *pt, void *mem) {
     pt->pd[0] = PDE64_PRESENT | PDE64_RW | PDE64_PS | 0x000000; // 2MiB
     pt->pd[1] = PDE64_PRESENT | PDE64_RW | PDE64_PS | 0x200000;
 }
+
+static void set_regs(int vcpufd) {
+
+    struct kvm_sregs sregs;
+    struct kvm_regs regs;
+    int ret = ioctl(vcpufd, KVM_GET_SREGS, &sregs);
+    if (ret == -1) {
+        err(1, "KVM_GET_SREGS failed");
+    }
+    struct kvm_segment seg = {
+        .base = 0,
+        .limit = 0xffffffff,
+        .selector = 1 << 3,
+        .present = 1,
+        .type = 11, // execute, read, accessed
+        .dpl = 0,
+        .db = 0, // must be zero when l = 1
+        .s = 1,  // code or data
+        .l = 1,  // 64 bit
+        .g = 1   // limit is in 4 KiB units
+    };
+
+    sregs.cs = seg;
+    sregs.cr0 = 1ULL << 31 | 1ULL | 1ULL << 1; // PE | MP | PG
+    sregs.cr3 = PML4_ADDR;
+    sregs.cr4 = 1ULL << 5; // PAE (mandatory for long mode)
+    // long mode enable and active, should be set by cpu, not here, since we are bootstraping
+    sregs.efer = 1ULL << 8 | 1ULL << 10;
+    seg.type = 3; // data: read, write, accessed
+    seg.selector = 2 << 3;
+    sregs.ds = sregs.es = sregs.fs = sregs.gs = sregs.ss = seg;
+    ret = ioctl(vcpufd, KVM_SET_SREGS, &sregs);
+    if (ret == -1) {
+        err(1, "KVM_SET_SREGS failed");
+    }
+    regs.rip = CODE_ADDR, regs.rax = 2, regs.rbx = 2, regs.rflags = 0x2,
+    ret = ioctl(vcpufd, KVM_SET_REGS, &regs);
+    if (ret == -1) {
+        err(1, "KVM_SET_REGS failed");
+    }
+}
+
 int main() {
     int kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
     if (kvm == -1) {
@@ -193,31 +235,12 @@ int main() {
     if (run == MAP_FAILED) {
         err(1, "mmap for VCPU failed");
     }
-    // read the sregs and set cs to 0
-    struct kvm_sregs sregs;
-    ret = ioctl(vcpufd, KVM_GET_SREGS, &sregs);
-    if (ret == -1) {
-        err(1, "KVM_GET_SREGS failed");
-    }
-    sregs.cs.base = 0;
-    sregs.cs.selector = 0;
-    ret = ioctl(vcpufd, KVM_SET_SREGS, &sregs);
-    if (ret == -1) {
-        err(1, "KVM_SET_SREGS failed");
-    }
-    struct kvm_regs regs = {
-        .rip = CODE_ADDR,
-        .rax = 2,
-        .rbx = 2,
-        .rflags = 0x2,
-    };
-    ret = ioctl(vcpufd, KVM_SET_REGS, &regs);
-    if (ret == -1) {
-        err(1, "KVM_SET_REGS failed");
-    }
     // build page tables
     struct PageTable pt;
     build_page_tables(&pt, mem);
+
+    // read the sregs and set cs to 0
+    set_regs(vcpufd);
     dump_state(vcpufd, mem);
 
     while (1) {
