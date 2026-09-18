@@ -3,10 +3,9 @@
 #include <linux/kvm.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 /*
 guest physical
@@ -22,16 +21,6 @@ guest physical
 #define PDPT_ADDR 0x1000
 #define PD_ADDR 0x2000
 #define CODE_ADDR 0x3000
-
-const uint8_t code[] = {
-    0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
-    0x00, 0xd8,       /* add %bl, %al */
-    0x04, '0',        /* add $'0', %al */
-    0xee,             /* out %al, (%dx) */
-    0xb0, '\n',       /* mov $'\n', %al */
-    0xee,             /* out %al, (%dx) */
-    0xf4,             /* hlt */
-};
 
 struct PageTable {
     uint64_t *pml4;
@@ -133,6 +122,26 @@ static void build_page_tables(struct PageTable *pt, void *mem) {
     pt->pd[1] = PDE64_PRESENT | PDE64_RW | PDE64_PS | 0x200000;
 }
 
+/* Reads `path` in full into guest memory at `mem + offset`. `mem` must
+ * already have at least the file's size mapped starting at `offset`. */
+static void load_guest_image(void *mem, size_t offset, const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd == -1) {
+        err(1, "opening %s failed", path);
+    }
+    struct stat st;
+    if (fstat(fd, &st) == -1) {
+        err(1, "fstat on %s failed", path);
+    }
+    ssize_t n = read(fd, (uint8_t *) mem + offset, (size_t) st.st_size);
+    if (n != st.st_size) {
+        err(1, "short read on %s", path);
+    }
+    if (close(fd) == -1) {
+        err(1, "closing %s failed", path);
+    }
+}
+
 static void set_regs(int vcpufd) {
 
     struct kvm_sregs sregs;
@@ -213,7 +222,7 @@ int main() {
     if (mem == MAP_FAILED) {
         err(1, "mmap failed");
     }
-    memcpy(mem + CODE_ADDR, code, sizeof(code));
+    load_guest_image(mem, CODE_ADDR, "guest64.bin");
 
     struct kvm_userspace_memory_region region = {
         .slot = 0,

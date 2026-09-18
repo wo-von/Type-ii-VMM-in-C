@@ -5,6 +5,8 @@ GUEST_CFLAGS = -m64 -ffreestanding -fno-pie -no-pie -nostdlib -mno-red-zone \
 	-fno-stack-protector -fno-asynchronous-unwind-tables
 GUEST_LDFLAGS = -Wl,--build-id=none -Wl,-Ttext=0x3000
 
+all: vmm guest
+
 vmm: vmm.c
 	$(CC) $(CFLAGS) -o $@ $<
 
@@ -19,4 +21,4 @@ guest: guest64.bin
 clean:
 	rm -f vmm guest64.elf guest64.bin
 
-.PHONY: guest clean
+.PHONY: all guest clean
